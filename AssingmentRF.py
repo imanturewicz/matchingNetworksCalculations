@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib as plt
 import schemdraw
 import schemdraw.elements as elm
 
@@ -39,7 +40,6 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
     """
     Draws the L-section circuit and saves it to a file.
     """
-    # Define a unique filename for each solution's diagram
     filename = f"L-Section_Solution_{solution_number}.svg"
     
     with schemdraw.Drawing() as d:
@@ -67,10 +67,10 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
 
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
         
-        # *** KEY CHANGE: Save to file instead of showing ***
+        # *** CORRECTED LINE ***
+        # The proper method to save the file is .save().
         d.save(filename)
     
-    # Inform the user that the file has been saved
     print(f"  🖼️  Circuit diagram saved as: {filename}")
 
 
