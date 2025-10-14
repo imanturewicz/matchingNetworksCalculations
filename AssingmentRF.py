@@ -1,5 +1,5 @@
 import numpy as np
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import schemdraw
 import schemdraw.elements as elm
 
@@ -42,7 +42,7 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
     """
     filename = f"L-Section_Solution_{solution_number}.svg"
     
-    with schemdraw.Drawing() as d:
+    with schemdraw.Drawing(show=False) as d:
         d.config(unit=3)
         d.add(elm.SourceV().label('$Z_S$\n' + f'{z_source.real:.1f} + {z_source.imag:.1f}j Ω', loc='bottom'))
         
@@ -77,12 +77,12 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
 # --- Network Calculation Functions ---
 # (calculate_l_section is slightly modified to print the save confirmation)
 def calculate_l_section(frequency_hz, z_source, z_load):
+    # ... (all the calculation logic at the beginning of the function is unchanged) ...
     omega = 2 * np.pi * frequency_hz
     Rs, Xs = z_source.real, z_source.imag
     Rl, Xl = z_load.real, z_load.imag
 
     def solve_match(r_s, x_s, r_l, x_l):
-        # ... (This inner function is unchanged)
         solutions = []
         D = (4 * (r_s**2) * (x_l**2)) - \
             (4 * (r_s**2) * (r_l**2 + x_l**2)) + \
@@ -103,7 +103,6 @@ def calculate_l_section(frequency_hz, z_source, z_load):
         solutions.append({'X_b': X_b2, 'X_a': calc_Xa(X_b2)})
         return solutions, None
 
-    # --- Main Calculation & Display Logic ---
     print("\n-------------------------------------------")
     print(" L-Section Matching Network Solutions")
     print(f" Matching Zs = {z_source} Ω to Zl = {z_load} Ω @ {frequency_hz / 1e6} MHz")
@@ -111,12 +110,13 @@ def calculate_l_section(frequency_hz, z_source, z_load):
 
     solutions1, error1 = solve_match(Rs, Xs, Rl, Xl)
     solutions2, error2 = solve_match(Rl, Xl, Rs, Xs)
+    
+    found_solution = False
 
     if not solutions1 and not solutions2:
         print(f"❌ No L-section match possible. Reason: {error1 or error2}")
         return
 
-    # Display Solutions 1 & 2 (Shunt at Source)
     print("## Topology 1: Shunt Component at SOURCE, Series at LOAD")
     if solutions1:
         for i, sol in enumerate(solutions1):
@@ -127,13 +127,13 @@ def calculate_l_section(frequency_hz, z_source, z_load):
             print(f"  Shunt Component (at Zs): {shunt_val}")
             print(f"  Series Component (at Zl): {series_val}")
             if 'N/A' not in shunt_val and 'N/A' not in series_val:
+                found_solution = True
                 draw_l_section(sol_num, z_source, z_load, shunt_val, series_val, 'shunt_source')
     else:
         print(f"-> No solutions found for this topology. ({error1})")
     
     print("\n" + "="*43 + "\n")
 
-    # Display Solutions 3 & 4 (Shunt at Load)
     print("## Topology 2: Shunt Component at LOAD, Series at SOURCE")
     if solutions2:
         for i, sol in enumerate(solutions2):
@@ -144,11 +144,17 @@ def calculate_l_section(frequency_hz, z_source, z_load):
             print(f"  Series Component (at Zs): {series_val}")
             print(f"  Shunt Component (at Zl): {shunt_val}")
             if 'N/A' not in shunt_val and 'N/A' not in series_val:
+                found_solution = True
                 draw_l_section(sol_num, z_source, z_load, shunt_val, series_val, 'shunt_load')
     else:
         print(f"-> No solutions found for this topology. ({error2})")
     
     print("\n-------------------------------------------")
+
+    # *** KEY CHANGE: Show all generated plots at once ***
+    if found_solution:
+        print("Displaying all valid circuit diagrams...")
+        plt.show()
 
 
 # --- Main execution ---
