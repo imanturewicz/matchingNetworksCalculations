@@ -1,6 +1,6 @@
 import numpy as np
 
-# --- Global Helper Functions --- 
+# --- Global Helper Functions ---
 
 def get_float_input(prompt):
     """A helper function to safely get a floating-point number from the user."""
