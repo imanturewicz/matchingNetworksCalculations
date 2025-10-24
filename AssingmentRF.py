@@ -1,18 +1,22 @@
 import numpy as np
+import matplotlib
+# We DO NOT use matplotlib.use('Agg') because we want plt.show()
 import matplotlib.pyplot as plt
 import schemdraw
 import schemdraw.elements as elm
 
-# --- Global Helper Functions ---
-# (These are unchanged)
+# --- Global Helper Functions: User Input ---
+# (Unchanged)
 def get_float_input(prompt):
+    """A helper function to safely get a floating-point number from the user."""
     while True:
         try:
             return float(input(prompt))
         except ValueError:
-            print("Invalid input. Please enter a valid number.")
+            print("  Invalid input. Please enter a valid number.")
 
 def get_complex_input(prompt):
+    """A helper function to safely get a complex impedance (R + jX) from the user."""
     print(prompt)
     while True:
         try:
@@ -20,9 +24,12 @@ def get_complex_input(prompt):
             imag_part = float(input("  Enter the Imaginary part (X): "))
             return complex(real_part, imag_part)
         except ValueError:
-            print("Invalid input. Please enter valid numbers for the real and imaginary parts.")
+            print("  Invalid input. Please enter valid numbers.")
 
+# --- Global Helper Functions: Component Calculation ---
+# (Unchanged)
 def get_component_value(reactance, omega):
+    """(REUSABLE) Converts a reactance value (X) into a practical component."""
     if np.isnan(reactance) or abs(omega) < 1e-12:
         return "N/A"
     if reactance > 0:
@@ -32,13 +39,61 @@ def get_component_value(reactance, omega):
         capacitance_pF = (-1 / (omega * reactance)) * 1e12
         return f"{capacitance_pF:.3f} pF (C)"
     else:
-        return "0 Ω"
+        return "0 Ω (short/wire)"
 
-# --- Drawing Function (MODIFIED) ---
+def get_component_value_from_susceptance(susceptance, omega):
+    """(REUSABLE) Converts a susceptance value (B) into a practical component."""
+    if np.isnan(susceptance) or abs(omega) < 1e-12:
+        return "N/A"
+    if susceptance > 0:
+        capacitance_pF = (susceptance / omega) * 1e12
+        return f"{capacitance_pF:.3f} pF (C)"
+    elif susceptance < 0:
+        inductance_nH = (-1 / (omega * susceptance)) * 1e9
+        return f"{inductance_nH:.3f} nH (L)"
+    else:
+        return "0 S (open)"
+
+# --- Global Helper Functions: Core Math ---
+# (Unchanged)
+def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
+    """Core math solver for T and Pi networks (dual logic)."""
+    all_solutions = []
+    Xb_list = [(q_val * r_l - x_l), (-q_val * r_l - x_l)]
+    denominator_Xc = 2 * (r_l - r_s)
+    if abs(denominator_Xc) < 1e-9:
+        return [], "Rs/Gs is equal to Rl/Gl. Cannot solve."
+    for Xb in Xb_list:
+        Xb_plus_Xl = Xb + x_l
+        term1 = r_s * (Xb_plus_Xl)**2
+        term2 = (r_l - r_s) * (r_l**2 + (Xb_plus_Xl)**2)
+        Delta = 4 * r_s * (term1 + term2)
+        if Delta < 0:
+            continue
+        sqrt_Delta = np.sqrt(Delta)
+        numerator_base_Xc = 2 * r_s * Xb_plus_Xl
+        Xc_list = [
+            (numerator_base_Xc + sqrt_Delta) / denominator_Xc,
+            (numerator_base_Xc - sqrt_Delta) / denominator_Xc
+        ]
+        for Xc in Xc_list:
+            Xc_plus_Xb_plus_Xl = Xc + Xb + x_l
+            numerator_Xa = Xc * (r_l**2 + Xb_plus_Xl * Xc_plus_Xb_plus_Xl)
+            denominator_Xa = r_l**2 + Xc_plus_Xb_plus_Xl**2
+            if abs(denominator_Xa) < 1e-9:
+                Xa = np.nan
+            else:
+                Xa = -x_s - (numerator_Xa / denominator_Xa)
+            if not np.isnan(Xa):
+                all_solutions.append({'Xa': Xa, 'Xb': Xb, 'Xc': Xc})
+    return all_solutions, None
+
+# --- Global Helper Functions: Drawing (USER'S LOGIC) ---
 
 def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, topology):
     """
     Draws the L-section circuit and saves it to a file.
+    Also prepares it for plt.show().
     """
     filename = f"L-Section_Solution_{solution_number}.svg"
     
@@ -67,22 +122,97 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
 
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
         
-        # *** CORRECTED LINE ***
-        # The proper method to save the file is .save().
+        d.save(filename)
+    
+    print(f"  🖼️  Circuit diagram saved as: {filename}")
+
+def draw_t_section(solution_number, z_source, z_load, xa_comp, xb_comp, xc_comp):
+    """
+    Draws the T-section circuit and saves it to a file.
+    Also prepares it for plt.show().
+    """
+    filename = f"T-Section_Solution_{solution_number}.svg"
+
+    with schemdraw.Drawing(show=False) as d:
+        d.config(unit=3)
+        
+        d.add(elm.SourceV().label('$Z_S$\n' + f'{z_source.real:.1f} + {z_source.imag:.1f}j Ω', loc='bottom'))
+        
+        el_a = elm.Capacitor if 'pF' in xa_comp else elm.Inductor
+        d.add(el_a().right().label(xa_comp, loc='bottom'))
+        
+        d.push()
+        el_c = elm.Capacitor if 'pF' in xc_comp else elm.Inductor
+        d.add(el_c().down().label(xc_comp, loc='bottom'))
+        d.add(elm.Ground())
+        d.pop()
+        
+        el_b = elm.Capacitor if 'pF' in xb_comp else elm.Inductor
+        d.add(el_b().right().label(xb_comp, loc='bottom'))
+        
+        d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
+
+        d.save(filename)
+    
+    print(f"  🖼️  Circuit diagram saved as: {filename}")
+
+def draw_pi_section(solution_number, z_source, z_load, ba_comp, bb_comp, bc_comp):
+    """
+    Draws the Pi-section circuit and saves it to a file.
+    Also prepares it for plt.show().
+    """
+    filename = f"Pi-Section_Solution_{solution_number}.svg"
+
+    with schemdraw.Drawing(show=False) as d:
+        d.config(unit=3)
+        
+        d.add(elm.SourceV().label('$Z_S$\n' + f'{z_source.real:.1f} + {z_source.imag:.1f}j Ω', loc='bottom'))
+        
+        # --- FIX ---
+        # Add a short wire to create the node *after* the source
+        d.add(elm.Line().right(d.unit/2)) 
+        
+        # Element Ba (Shunt at Source)
+        d.push() # Save the node position
+        el_a = elm.Capacitor if 'pF' in ba_comp else elm.Inductor
+        d.add(el_a().down().label(ba_comp, loc='bottom'))
+        d.add(elm.Ground())
+        d.pop() # Return to the node position
+        
+        # Element Bc (Series)
+        el_c = elm.Capacitor if 'pF' in bc_comp else elm.Inductor
+        d.add(el_c().right().label(bc_comp, loc='bottom'))
+        
+        # --- FIX ---
+        # Add a short wire to create the second node
+        d.add(elm.Line().right(d.unit/2))
+        
+        # Element Bb (Shunt at Load)
+        d.push() # Save the second node position
+        el_b = elm.Capacitor if 'pF' in bb_comp else elm.Inductor
+        d.add(el_b().down().label(bb_comp, loc='bottom'))
+        d.add(elm.Ground())
+        d.pop() # Return to the second node position
+        
+        d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
+
         d.save(filename)
     
     print(f"  🖼️  Circuit diagram saved as: {filename}")
 
 
-# --- Network Calculation Functions ---
-# (calculate_l_section is slightly modified to print the save confirmation)
+# --- Network Calculation Functions (USER'S LOGIC) ---
+
 def calculate_l_section(frequency_hz, z_source, z_load):
-    # ... (all the calculation logic at the beginning of the function is unchanged) ...
+    """
+    Calculates and displays L-section networks, then calls plt.show().
+    """
     omega = 2 * np.pi * frequency_hz
     Rs, Xs = z_source.real, z_source.imag
     Rl, Xl = z_load.real, z_load.imag
 
     def solve_match(r_s, x_s, r_l, x_l):
+        # (Inner function unchanged)
         solutions = []
         D = (4 * (r_s**2) * (x_l**2)) - \
             (4 * (r_s**2) * (r_l**2 + x_l**2)) + \
@@ -110,8 +240,7 @@ def calculate_l_section(frequency_hz, z_source, z_load):
 
     solutions1, error1 = solve_match(Rs, Xs, Rl, Xl)
     solutions2, error2 = solve_match(Rl, Xl, Rs, Xs)
-    
-    found_solution = False
+    found_solution = False 
 
     if not solutions1 and not solutions2:
         print(f"❌ No L-section match possible. Reason: {error1 or error2}")
@@ -151,121 +280,19 @@ def calculate_l_section(frequency_hz, z_source, z_load):
     
     print("\n-------------------------------------------")
 
-    # *** KEY CHANGE: Show all generated plots at once ***
     if found_solution:
         print("Displaying all valid circuit diagrams...")
         plt.show()
 
 
-# --- Main execution ---
-# (The rest of your script is unchanged)
-def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
-    print("\n-> Pi-Section Calculator Called (Not Implemented)")
-    pass
-
-def draw_t_section(solution_number, z_source, z_load, xa_comp, xb_comp, xc_comp):
-    """
-    Draws the T-section circuit and saves it to a file, just like the L-section.
-    Xa is series at source, Xb is series at load, Xc is shunt.
-    """
-    filename = f"T-Section_Solution_{solution_number}.svg"
-
-    with schemdraw.Drawing(show=False) as d:
-        d.config(unit=3)
-        # We do NOT set a title, just like in the L-section code
-        
-        d.add(elm.SourceV().label('$Z_S$\n' + f'{z_source.real:.1f} + {z_source.imag:.1f}j Ω', loc='bottom'))
-        
-        # Element Xa (Series at Source)
-        el_a = elm.Capacitor if 'pF' in xa_comp else elm.Inductor
-        d.add(el_a().right().label(xa_comp, loc='bottom'))
-        
-        # Element Xc (Shunt)
-        d.push()
-        el_c = elm.Capacitor if 'pF' in xc_comp else elm.Inductor
-        d.add(el_c().down().label(xc_comp, loc='bottom'))
-        d.add(elm.Ground())
-        d.pop()
-        
-        # Element Xb (Series at Load)
-        el_b = elm.Capacitor if 'pF' in xb_comp else elm.Inductor
-        d.add(el_b().right().label(xb_comp, loc='bottom'))
-        
-        d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
-
-        # The proper method to save the file is .save()
-        d.save(filename)
-    
-    print(f"  🖼️  Circuit diagram saved as: {filename}")
-
-# --- REPLACED: T-Section Calculation Function ---
 def calculate_t_section(frequency_hz, z_source, z_load, q_max):
     """
-    Calculates and displays the possible T-section matching networks.
+    Calculates and displays T-section networks, then calls plt.show().
     """
     omega = 2 * np.pi * frequency_hz
     Rs, Xs = z_source.real, z_source.imag
     Rl, Xl = z_load.real, z_load.imag
 
-    def solve_t_math(r_s, x_s, r_l, x_l, q_val):
-        """
-        Core math solver based on the Rl < Rs formulas.
-        Returns a list of solutions: [{'Xa': val, 'Xb': val, 'Xc': val}, ...]
-        """
-        all_solutions = []
-        
-        # 1. Calculate the two possible Xb values
-        Xb_list = [
-            (q_val * r_l - x_l),
-            (-q_val * r_l - x_l)
-        ]
-        
-        denominator_Xc = 2 * (r_l - r_s)
-        if abs(denominator_Xc) < 1e-9:
-            # This happens if Rs == Rl. The provided formulas are not
-            # applicable. A different approach (e.g., Pi-network) is needed.
-            return [], "Rs is equal to Rl. Cannot solve with these formulas."
-        
-        for Xb in Xb_list:
-            Xb_plus_Xl = Xb + x_l
-            
-            # 2. Calculate Delta
-            # Delta = 4*Rs*(Rs*(Xb+Xl)^2+(Rl-Rs)(Rl^2+(Xb+Xl)^2))
-            term1 = r_s * (Xb_plus_Xl)**2
-            term2 = (r_l - r_s) * (r_l**2 + (Xb_plus_Xl)**2)
-            Delta = 4 * r_s * (term1 + term2)
-            
-            if Delta < 0:
-                # No real solution for Xc with this Xb, so we skip
-                continue
-            
-            # 3. Calculate Xc values
-            sqrt_Delta = np.sqrt(Delta)
-            numerator_base_Xc = 2 * r_s * Xb_plus_Xl
-            
-            Xc_list = [
-                (numerator_base_Xc + sqrt_Delta) / denominator_Xc,
-                (numerator_base_Xc - sqrt_Delta) / denominator_Xc
-            ]
-            
-            for Xc in Xc_list:
-                # 4. Calculate Xa for this (Xb, Xc) pair
-                Xc_plus_Xb_plus_Xl = Xc + Xb + x_l
-                
-                numerator_Xa = Xc * (r_l**2 + Xb_plus_Xl * Xc_plus_Xb_plus_Xl)
-                denominator_Xa = r_l**2 + Xc_plus_Xb_plus_Xl**2
-                
-                if abs(denominator_Xa) < 1e-9:
-                    Xa = np.nan # Solution is invalid
-                else:
-                    Xa = -x_s - (numerator_Xa / denominator_Xa)
-                
-                if not np.isnan(Xa):
-                    all_solutions.append({'Xa': Xa, 'Xb': Xb, 'Xc': Xc})
-                    
-        return all_solutions, None
-
-    # --- Main Calculation and Display Logic ---
     print("\n-------------------------------------------")
     print(" T-Section Matching Network Solutions")
     print(f" Matching Zs = {z_source} Ω to Zl = {z_load} Ω @ {frequency_hz / 1e6} MHz")
@@ -273,24 +300,19 @@ def calculate_t_section(frequency_hz, z_source, z_load, q_max):
     print("-------------------------------------------\n")
 
     if abs(Rl - Rs) < 1e-9:
-        print("❌ Rs is equal to Rl. The T-network formulas provided are not suitable.")
-        print("   Consider using an L-section (if reactances allow) or a Pi-network.")
+        print("❌ Rs is equal to Rl. The T-network formulas are not suitable.")
         return
 
     solutions = []
     topology = ""
+    found_solution = False # Tracks if we found any valid plots to show
     
     if Rl < Rs:
-        # Standard case, formulas apply directly
         topology = "standard"
-        solutions, error = solve_t_math(Rs, Xs, Rl, Xl, q_max)
-    
+        solutions, error = _solve_t_pi_math(Rs, Xs, Rl, Xl, q_max)
     elif Rl > Rs:
-        # Swapped case. We swap Zs and Zl for the calculation.
         topology = "swapped"
-        # Note: The math function still uses (Rs, Xs, Rl, Xl) as variable names,
-        # but we are passing the *values* from Zl and Zs into them.
-        solutions, error = solve_t_math(Rl, Xl, Rs, Xs, q_max)
+        solutions, error = _solve_t_pi_math(Rl, Xl, Rs, Xs, q_max)
         
     if error:
         print(f"❌ Calculation error: {error}")
@@ -300,56 +322,125 @@ def calculate_t_section(frequency_hz, z_source, z_load, q_max):
         print("❌ No real solutions found for these parameters and Q_max.")
         return
 
-    found_solution = False
     sol_num = 1
     
     for sol in solutions:
-        found_solution = True
-        
         if topology == "standard":
-            # Labels match the formulas directly
-            xa_val = sol['Xa']
-            xb_val = sol['Xb']
-            xc_val = sol['Xc']
-            
+            xa_val, xb_val, xc_val = sol['Xa'], sol['Xb'], sol['Xc']
             xa_comp = get_component_value(xa_val, omega)
             xb_comp = get_component_value(xb_val, omega)
             xc_comp = get_component_value(xc_val, omega)
-
             print(f"--- Solution {sol_num} (Topology Rl < Rs) ---")
             print(f"  Series (at Zs):   {xa_comp}")
             print(f"  Shunt (middle):   {xc_comp}")
             print(f"  Series (at Zl):   {xb_comp}")
             
         elif topology == "swapped":
-            # Labels are swapped!
-            # 'Xa' from the math is at the "new" source, (original load)
-            # 'Xb' from the math is at the "new" load, (original source)
-            xa_val = sol['Xb'] # This is the component at the original source
-            xb_val = sol['Xa'] # This is the component at the original load
-            xc_val = sol['Xc'] # Shunt is still shunt
-            
+            xa_val, xb_val, xc_val = sol['Xb'], sol['Xa'], sol['Xc']
             xa_comp = get_component_value(xa_val, omega)
             xb_comp = get_component_value(xb_val, omega)
             xc_comp = get_component_value(xc_val, omega)
-            
             print(f"--- Solution {sol_num} (Topology Rl > Rs) ---")
             print(f"  Series (at Zs):   {xa_comp}")
             print(f"  Shunt (middle):   {xc_comp}")
             print(f"  Series (at Zl):   {xb_comp}")
 
-        # Draw the network
         if 'N/A' not in [xa_comp, xb_comp, xc_comp]:
+            found_solution = True
             draw_t_section(sol_num, z_source, z_load, xa_comp, xb_comp, xc_comp)
         
         sol_num += 1
-
-    if found_solution:
-        print("\nDisplaying all valid circuit diagrams...")
-        plt.show()
     
     print("\n-------------------------------------------")
 
+    if found_solution:
+        print("Displaying all valid circuit diagrams...")
+        plt.show()
+
+
+def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
+    """
+    Calculates and displays Pi-section networks, then calls plt.show().
+    """
+    omega = 2 * np.pi * frequency_hz
+
+    if abs(z_source) < 1e-9 or abs(z_load) < 1e-9:
+        print("❌ Error: Source or Load impedance is zero.")
+        return
+
+    y_source = 1 / z_source
+    y_load = 1 / z_load
+    Gs, Bs = y_source.real, y_source.imag
+    Gl, Bl = y_load.real, y_load.imag
+
+    print("\n-------------------------------------------")
+    print(" Pi-Section Matching Network Solutions")
+    print(f" Matching Zs = {z_source} Ω to Zl = {z_load} Ω @ {frequency_hz / 1e6} MHz")
+    print(f" (Using Ys = {y_source:.3f} S and Yl = {y_load:.3f} S)")
+    print(f" Using Q_max = {q_max:.2f}")
+    print("-------------------------------------------\n")
+
+    if abs(Gl - Gs) < 1e-9:
+        print("❌ Gs is equal to Gl. The Pi-network formulas are not suitable.")
+        return
+
+    solutions = []
+    topology = ""
+    found_solution = False # Tracks if we found any valid plots to show
+    
+    if Gl < Gs:
+        topology = "standard"
+        solutions, error = _solve_t_pi_math(Gs, Bs, Gl, Bl, q_max)
+    elif Gl > Gs:
+        topology = "swapped"
+        solutions, error = _solve_t_pi_math(Gl, Bl, Gs, Bs, q_max)
+        
+    if error:
+        print(f"❌ Calculation error: {error}")
+        return
+        
+    if not solutions:
+        print("❌ No real solutions found for these parameters and Q_max.")
+        return
+
+    sol_num = 1
+    
+    for sol in solutions:
+        if topology == "standard":
+            ba_val, bb_val, bc_val = sol['Xa'], sol['Xb'], sol['Xc']
+            ba_comp = get_component_value_from_susceptance(ba_val, omega)
+            bb_comp = get_component_value_from_susceptance(bb_val, omega)
+            bc_comp = get_component_value_from_susceptance(bc_val, omega)
+            print(f"--- Solution {sol_num} (Topology Gl < Gs) ---")
+            print(f"  Shunt (at Zs):    {ba_comp}")
+            print(f"  Series (middle):  {bc_comp}")
+            print(f"  Shunt (at Zl):    {bb_comp}")
+            
+        elif topology == "swapped":
+            ba_val, bb_val, bc_val = sol['Xb'], sol['Xa'], sol['Xc']
+            ba_comp = get_component_value_from_susceptance(ba_val, omega)
+            bb_comp = get_component_value_from_susceptance(bb_val, omega)
+            bc_comp = get_component_value_from_susceptance(bc_val, omega)
+            print(f"--- Solution {sol_num} (Topology Gl > Gs) ---")
+            print(f"  Shunt (at Zs):    {ba_comp}")
+            print(f"  Series (middle):  {bc_comp}")
+            print(f"  Shunt (at Zl):    {bb_comp}")
+
+        if 'N/A' not in [ba_comp, bb_comp, bc_comp]:
+            found_solution = True
+            draw_pi_section(sol_num, z_source, z_load, ba_comp, bb_comp, bc_comp)
+        
+        sol_num += 1
+    
+    print("\n-------------------------------------------")
+
+    if found_solution:
+        print("Displaying all valid circuit diagrams...")
+        plt.show()
+
+
+# --- Main Program Logic ---
+# (Unchanged)
 def main():
     """Main function to run the matching network tool."""
     print("=============================================")
@@ -367,7 +458,6 @@ def main():
         print("Invalid choice. Please run the program again.")
         return
 
-    # --- Get common user inputs ---
     print("\nPlease provide the following parameters:")
     frequency_mhz = get_float_input("Operating Frequency (in MHz): ")
     z_source = get_complex_input("Source Impedance (Z_S):")
@@ -375,14 +465,11 @@ def main():
 
     frequency_hz = frequency_mhz * 1e6
 
-    # --- Call the appropriate function based on user choice ---
     if choice == '1':
         calculate_l_section(frequency_hz, z_source, z_load)
         
     elif choice == '2' or choice == '3':
-        # --- New Q-Factor Logic for π and T sections ---
         
-        # 1. Calculate inherent nodal Qs
         q_s = abs(z_source.imag) / z_source.real if z_source.real > 1e-9 else float('inf')
         q_l = abs(z_load.imag) / z_load.real if z_load.real > 1e-9 else float('inf')
         
@@ -398,9 +485,8 @@ def main():
 
         print(f"\nThe Maximum Nodal Q (Q_max) must be at least {min_required_q:.2f}")
 
-        q_max = 0.0 # Initialize q_max outside the loop
+        q_max = 0.0
 
-        # *** START OF NEW LOOP ***
         while True: 
             print("\nHow do you want to specify the network Q?")
             print("  1. Maximum Nodal Q (Q_max)")
@@ -408,7 +494,6 @@ def main():
             print("  3. Bandwidth (BW) in MHz")
             q_choice = input("Enter your choice (1-3): ")
 
-            # 2. Get user input and calculate Q_max
             if q_choice == '1':
                 q_max = get_float_input("Enter Maximum Nodal Quality Factor (Q_max): ")
             elif q_choice == '2':
@@ -419,28 +504,25 @@ def main():
                 bw_mhz = get_float_input("Enter Desired Bandwidth (in MHz): ")
                 if bw_mhz <= 0:
                     print("❌ Error: Bandwidth must be a positive number. Please try again.")
-                    continue # Restart the loop
+                    continue
                 q_tot = frequency_mhz / bw_mhz
                 q_max = q_tot * 2
                 print(f"-> Calculated Q_tot = {frequency_mhz} MHz / {bw_mhz} MHz = {q_tot:.2f}")
                 print(f"-> Calculated Q_max = {q_tot:.2f} * 2 = {q_max:.2f}")
             else:
                 print("❌ Invalid choice. Please try again.")
-                continue # Restart the loop
+                continue
 
-            # 3. Validate the calculated Q_max
             if q_max < min_required_q:
                 print("\n" + "!"*50)
                 print(f"❌ ERROR: Specified Q_max ({q_max:.2f}) is too low.")
                 print(f"         It must be >= {min_required_q:.2f} to absorb the source/load reactance.")
                 print("         Please enter a valid Q specification.")
                 print("!"*50)
-                # Loop continues automatically
             else:
                 print(f"✅ Q_max ({q_max:.2f}) is valid.")
-                break # *** EXIT LOOP ***
+                break
         
-        # 4. Call the correct placeholder function (now guaranteed to have valid q_max)
         if choice == '2':
             calculate_pi_section(frequency_hz, z_source, z_load, q_max)
         elif choice == '3':
