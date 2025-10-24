@@ -250,7 +250,7 @@ def calculate_t_section(frequency_hz, z_source, z_load, q_max):
             
             for Xc in Xc_list:
                 # 4. Calculate Xa for this (Xb, Xc) pair
-                Xc_plus_Xb_plus_Xl = Xc + Xb + Xl
+                Xc_plus_Xb_plus_Xl = Xc + Xb + x_l
                 
                 numerator_Xa = Xc * (r_l**2 + Xb_plus_Xl * Xc_plus_Xb_plus_Xl)
                 denominator_Xa = r_l**2 + Xc_plus_Xb_plus_Xl**2
