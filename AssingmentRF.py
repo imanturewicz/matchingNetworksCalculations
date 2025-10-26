@@ -92,7 +92,7 @@ def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
 
 def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, topology):
     """
-    Draws the L-section circuit and saves it to a file.
+    Draws the L-section circuit with larger gaps and saves it to a file.
     Also prepares it for plt.show().
     """
     filename = f"L-Section_Solution_{solution_number}.svg"
@@ -104,21 +104,33 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
         if topology == 'shunt_source':
             shunt_element = elm.Capacitor if 'pF' in shunt_comp else elm.Inductor
             series_element = elm.Capacitor if 'pF' in series_comp else elm.Inductor
-            d.add(elm.Line().right())
+            
+            # --- FIX: Add a long wire to create the gap ---
+            d.add(elm.Line().right(d.unit * 2)) 
+            
             d.push()
             d.add(shunt_element().down().label(shunt_comp, loc='bottom'))
             d.add(elm.Ground())
             d.pop()
-            d.add(series_element().right().label(series_comp, loc='bottom'))
+            d.add(series_element().right().label(series_comp, loc='top')) # Label to top
+            
+            # --- FIX: Add small gap before load ---
+            d.add(elm.Line().right(d.unit / 2))
         
         elif topology == 'shunt_load':
             series_element = elm.Capacitor if 'pF' in series_comp else elm.Inductor
             shunt_element = elm.Capacitor if 'pF' in shunt_comp else elm.Inductor
-            d.add(series_element().right().label(series_comp, loc='bottom'))
+            
+            # --- FIX: Make the first series element longer ---
+            d.add(series_element().right(d.unit * 2).label(series_comp, loc='top')) # Label to top
+            
             d.push()
             d.add(shunt_element().down().label(shunt_comp, loc='bottom'))
             d.add(elm.Ground())
             d.pop()
+            
+            # --- FIX: Add small gap before load ---
+            d.add(elm.Line().right(d.unit / 2))
 
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
         
@@ -128,7 +140,7 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
 
 def draw_t_section(solution_number, z_source, z_load, xa_comp, xb_comp, xc_comp):
     """
-    Draws the T-section circuit and saves it to a file.
+    Draws the T-section circuit with larger gaps and saves it to a file.
     Also prepares it for plt.show().
     """
     filename = f"T-Section_Solution_{solution_number}.svg"
@@ -138,17 +150,25 @@ def draw_t_section(solution_number, z_source, z_load, xa_comp, xb_comp, xc_comp)
         
         d.add(elm.SourceV().label('$Z_S$\n' + f'{z_source.real:.1f} + {z_source.imag:.1f}j Ω', loc='bottom'))
         
+        # Element Xa (Series at Source)
         el_a = elm.Capacitor if 'pF' in xa_comp else elm.Inductor
-        d.add(el_a().right().label(xa_comp, loc='bottom'))
         
+        # --- FIX: Make the first series element longer ---
+        d.add(el_a().right(d.unit * 2).label(xa_comp, loc='top')) # Label to top
+        
+        # Element Xc (Shunt)
         d.push()
         el_c = elm.Capacitor if 'pF' in xc_comp else elm.Inductor
         d.add(el_c().down().label(xc_comp, loc='bottom'))
         d.add(elm.Ground())
         d.pop()
         
+        # Element Xb (Series at Load)
         el_b = elm.Capacitor if 'pF' in xb_comp else elm.Inductor
-        d.add(el_b().right().label(xb_comp, loc='bottom'))
+        d.add(el_b().right().label(xb_comp, loc='top')) # Label to top
+        
+        # --- FIX: Add small gap before load ---
+        d.add(elm.Line().right(d.unit / 2))
         
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
 
@@ -158,22 +178,23 @@ def draw_t_section(solution_number, z_source, z_load, xa_comp, xb_comp, xc_comp)
 
 def draw_pi_section(solution_number, z_source, z_load, ba_comp, bb_comp, bc_comp):
     """
-    Draws the Pi-section circuit and saves it to a file.
+    Draws the Pi-section circuit with correct spacing and saves it to a file.
     Also prepares it for plt.show().
     """
     filename = f"Pi-Section_Solution_{solution_number}.svg"
 
     with schemdraw.Drawing(show=False) as d:
-        d.config(unit=3)
+        d.config(unit=3) # Base unit for components and default line lengths
         
         d.add(elm.SourceV().label('$Z_S$\n' + f'{z_source.real:.1f} + {z_source.imag:.1f}j Ω', loc='bottom'))
         
-        # --- FIX ---
-        # Add a short wire to create the node *after* the source
-        d.add(elm.Line().right(d.unit/2)) 
+        # --- FIX: Significantly increase space after the source ---
+        # We want the source to be spaced out from the first shunt.
+        # Let's use a length of 2*d.unit for this initial connection.
+        d.add(elm.Line().right(d.unit * 2)) 
         
         # Element Ba (Shunt at Source)
-        d.push() # Save the node position
+        d.push() # Save the node position before drawing down
         el_a = elm.Capacitor if 'pF' in ba_comp else elm.Inductor
         d.add(el_a().down().label(ba_comp, loc='bottom'))
         d.add(elm.Ground())
@@ -181,11 +202,13 @@ def draw_pi_section(solution_number, z_source, z_load, ba_comp, bb_comp, bc_comp
         
         # Element Bc (Series)
         el_c = elm.Capacitor if 'pF' in bc_comp else elm.Inductor
-        d.add(el_c().right().label(bc_comp, loc='bottom'))
-        
-        # --- FIX ---
-        # Add a short wire to create the second node
-        d.add(elm.Line().right(d.unit/2))
+        # The series component will have its default length (d.unit)
+        d.add(el_c().right().label(bc_comp, loc='top')) # Changed label loc for series for clarity if shunt below
+
+        # --- FIX: Keep the middle section closer ---
+        # Restore the shorter line segment for the connection between the series
+        # component and the second shunt. We'll use d.unit / 2 for this.
+        d.add(elm.Line().right(d.unit / 2)) 
         
         # Element Bb (Shunt at Load)
         d.push() # Save the second node position
@@ -194,6 +217,7 @@ def draw_pi_section(solution_number, z_source, z_load, ba_comp, bb_comp, bc_comp
         d.add(elm.Ground())
         d.pop() # Return to the second node position
         
+        # Default line segment before the load
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
 
         d.save(filename)
