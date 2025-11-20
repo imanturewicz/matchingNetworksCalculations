@@ -54,58 +54,35 @@ def get_numeric_component_value(reactance, omega):
     else:
         return 'Short', 0.0
 
-# --- ABCD Matrix Helper Functions (New for IL Plotting) ---
+# --- ABCD Matrix Helper Functions ---
 
 def get_abcd_series(z_ohms):
-    """Returns ABCD matrix for a series impedance Z."""
-    # [ 1  Z ]
-    # [ 0  1 ]
     return np.array([[1, z_ohms], [0, 1]], dtype=complex)
 
 def get_abcd_shunt(z_ohms):
-    """Returns ABCD matrix for a shunt impedance Z."""
-    # [ 1    0 ]
-    # [ 1/Z  1 ]
-    if abs(z_ohms) < 1e-12: # Avoid divide by zero (short circuit)
-        y = 1e12 
-    else:
-        y = 1 / z_ohms
+    if abs(z_ohms) < 1e-12: y = 1e12 
+    else: y = 1 / z_ohms
     return np.array([[1, 0], [y, 1]], dtype=complex)
 
 def get_z_component(ctype, value, omega):
-    """Calculates Impedance Z = R + jX at a specific frequency."""
-    if ctype == 'L':
-        return 1j * omega * value
+    if ctype == 'L': return 1j * omega * value
     elif ctype == 'C':
-        if omega == 0: return -1j * 1e12 # Avoid infinity at DC
+        if omega == 0: return -1j * 1e12
         return 1 / (1j * omega * value)
-    elif ctype == 'Short':
-        return 0.0
+    elif ctype == 'Short': return 0.0
     return 0.0
 
 def calculate_insertion_loss_db(abcd_matrix, Zs, Zl):
-    """
-    Calculates IL (dB) from total ABCD matrix, Z_source, and Z_load.
-    Formula: IL = 20 * log10( |A*Zl + B + C*Zs*Zl + D*Zs| / (2 * sqrt(Re(Zs)*Re(Zl))) )
-    """
-    A = abcd_matrix[0, 0]
-    B = abcd_matrix[0, 1]
-    C = abcd_matrix[1, 0]
-    D = abcd_matrix[1, 1]
-
+    A, B, C, D = abcd_matrix[0, 0], abcd_matrix[0, 1], abcd_matrix[1, 0], abcd_matrix[1, 1]
     numerator = A * Zl + B + C * Zs * Zl + D * Zs
     denominator = 2 * np.sqrt(Zs.real * Zl.real)
-    
-    # Avoid domain error if resistance is 0 (though matching requires real parts)
     if denominator == 0: denominator = 1e-12
-    
     ratio = abs(numerator) / denominator
     if ratio == 0: return 0
     return 20 * np.log10(ratio)
 
 # --- Core Math ---
 def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
-    """Core math solver for T and Pi networks."""
     all_solutions = []
     Xb_list = [(q_val * r_l - x_l), (-q_val * r_l - x_l)]
     denominator_Xc = 2 * (r_l - r_s)
@@ -116,27 +93,20 @@ def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
         term1 = r_s * (Xb_plus_Xl)**2
         term2 = (r_l - r_s) * (r_l**2 + (Xb_plus_Xl)**2)
         Delta = 4 * r_s * (term1 + term2)
-        if Delta < 0:
-            continue
+        if Delta < 0: continue
         sqrt_Delta = np.sqrt(Delta)
         numerator_base_Xc = 2 * r_s * Xb_plus_Xl
-        Xc_list = [
-            (numerator_base_Xc + sqrt_Delta) / denominator_Xc,
-            (numerator_base_Xc - sqrt_Delta) / denominator_Xc
-        ]
+        Xc_list = [(numerator_base_Xc + sqrt_Delta) / denominator_Xc, (numerator_base_Xc - sqrt_Delta) / denominator_Xc]
         for Xc in Xc_list:
             Xc_plus_Xb_plus_Xl = Xc + Xb + x_l
             numerator_Xa = Xc * (r_l**2 + Xb_plus_Xl * Xc_plus_Xb_plus_Xl)
             denominator_Xa = r_l**2 + Xc_plus_Xb_plus_Xl**2
-            if abs(denominator_Xa) < 1e-9:
-                Xa = np.nan
-            else:
-                Xa = -x_s - (numerator_Xa / denominator_Xa)
-            if not np.isnan(Xa):
-                all_solutions.append({'Xa': Xa, 'Xb': Xb, 'Xc': Xc})
+            if abs(denominator_Xa) < 1e-9: Xa = np.nan
+            else: Xa = -x_s - (numerator_Xa / denominator_Xa)
+            if not np.isnan(Xa): all_solutions.append({'Xa': Xa, 'Xb': Xb, 'Xc': Xc})
     return all_solutions, None
 
-# --- Drawing Functions (Unchanged) ---
+# --- Drawing Functions ---
 
 def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, topology):
     filename = f"L-Section_Solution_{solution_number}.svg"
@@ -165,7 +135,6 @@ def draw_l_section(solution_number, z_source, z_load, shunt_comp, series_comp, t
             d.add(elm.Line().right(d.unit / 2))
 
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
-        # d.save(filename) # Uncomment to save
     print(f"  Circuit diagram generated: {filename}")
 
 def draw_t_section(solution_number, z_source, z_load, xa_comp, xb_comp, xc_comp):
@@ -184,7 +153,6 @@ def draw_t_section(solution_number, z_source, z_load, xa_comp, xb_comp, xc_comp)
         d.add(el_b().right().label(xb_comp, loc='top'))
         d.add(elm.Line().right(d.unit / 2))
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
-        # d.save(filename)
     print(f"  Circuit diagram generated: {filename}")
 
 def draw_pi_section(solution_number, z_source, z_load, ba_comp, bb_comp, bc_comp):
@@ -207,7 +175,6 @@ def draw_pi_section(solution_number, z_source, z_load, ba_comp, bb_comp, bc_comp
         d.add(elm.Ground())
         d.pop()
         d.add(elm.Resistor().right().label('$Z_L$\n' + f'{z_load.real:.1f} + {z_load.imag:.1f}j Ω', loc='bottom'))
-        # d.save(filename)
     print(f"  Circuit diagram generated: {filename}")
 
 
@@ -218,7 +185,6 @@ def calculate_l_section(frequency_hz, z_source, z_load):
     Rs, Xs = z_source.real, z_source.imag
     Rl, Xl = z_load.real, z_load.imag
     
-    # Store solutions to return for plotting
     valid_solutions = [] 
     global_sol_counter = 1
 
@@ -252,8 +218,6 @@ def calculate_l_section(frequency_hz, z_source, z_load):
             xa, xb = sol['X_a'], sol['X_b']
             shunt_str = get_component_string(xa, omega)
             series_str = get_component_string(xb, omega)
-            
-            # Save numeric values for plotting
             type_a, val_a = get_numeric_component_value(xa, omega)
             type_b, val_b = get_numeric_component_value(xb, omega)
 
@@ -263,12 +227,8 @@ def calculate_l_section(frequency_hz, z_source, z_load):
                 draw_l_section(global_sol_counter, z_source, z_load, shunt_str, series_str, 'shunt_source')
                 
                 valid_solutions.append({
-                    'id': global_sol_counter,
-                    'type': 'L_ShuntSource',
-                    'comps': [
-                        {'pos': 'shunt', 'type': type_a, 'val': val_a}, 
-                        {'pos': 'series', 'type': type_b, 'val': val_b}
-                    ]
+                    'id': global_sol_counter, 'type': 'L_ShuntSource',
+                    'comps': [{'pos': 'shunt', 'type': type_a, 'val': val_a}, {'pos': 'series', 'type': type_b, 'val': val_b}]
                 })
                 global_sol_counter += 1
 
@@ -276,13 +236,11 @@ def calculate_l_section(frequency_hz, z_source, z_load):
     sols2, _ = solve_match(Rl, Xl, Rs, Xs)
     if sols2:
         for sol in sols2:
-            # Note: Input to solve_match was flipped, so X_a is shunt@Load, X_b is series@Source
             xa, xb = sol['X_a'], sol['X_b'] 
             series_str = get_component_string(xb, omega)
             shunt_str = get_component_string(xa, omega)
-
-            type_a, val_a = get_numeric_component_value(xa, omega) # Shunt
-            type_b, val_b = get_numeric_component_value(xb, omega) # Series
+            type_a, val_a = get_numeric_component_value(xa, omega) 
+            type_b, val_b = get_numeric_component_value(xb, omega) 
 
             if type_a and type_b:
                 print(f"[{global_sol_counter}] Series-Shunt (Shunt@Load)")
@@ -290,27 +248,19 @@ def calculate_l_section(frequency_hz, z_source, z_load):
                 draw_l_section(global_sol_counter, z_source, z_load, shunt_str, series_str, 'shunt_load')
 
                 valid_solutions.append({
-                    'id': global_sol_counter,
-                    'type': 'L_ShuntLoad',
-                    'comps': [
-                        {'pos': 'series', 'type': type_b, 'val': val_b},
-                        {'pos': 'shunt', 'type': type_a, 'val': val_a}
-                    ]
+                    'id': global_sol_counter, 'type': 'L_ShuntLoad',
+                    'comps': [{'pos': 'series', 'type': type_b, 'val': val_b}, {'pos': 'shunt', 'type': type_a, 'val': val_a}]
                 })
                 global_sol_counter += 1
-
     return valid_solutions
 
 def calculate_t_section(frequency_hz, z_source, z_load, q_max):
     omega = 2 * np.pi * frequency_hz
     Rs, Xs = z_source.real, z_source.imag
     Rl, Xl = z_load.real, z_load.imag
-    
     valid_solutions = []
     global_sol_counter = 1
-
     topology = "standard" if Rl < Rs else "swapped"
-    # Solve
     args = (Rs, Xs, Rl, Xl) if Rl < Rs else (Rl, Xl, Rs, Xs)
     solutions, error = _solve_t_pi_math(*args, q_max)
 
@@ -320,18 +270,12 @@ def calculate_t_section(frequency_hz, z_source, z_load, q_max):
 
     print("\n--- T-Section Solutions ---")
     for sol in solutions:
-        # Extract Reactances
-        if topology == "standard":
-            xa, xb, xc = sol['Xa'], sol['Xb'], sol['Xc'] # Series(S), Series(L), Shunt
-        else:
-            xa, xb, xc = sol['Xb'], sol['Xa'], sol['Xc'] # Swapped logic
+        if topology == "standard": xa, xb, xc = sol['Xa'], sol['Xb'], sol['Xc']
+        else: xa, xb, xc = sol['Xb'], sol['Xa'], sol['Xc']
 
-        # Get Strings
         str_a = get_component_string(xa, omega)
         str_b = get_component_string(xb, omega)
         str_c = get_component_string(xc, omega)
-        
-        # Get Numeric
         ta, va = get_numeric_component_value(xa, omega)
         tb, vb = get_numeric_component_value(xb, omega)
         tc, vc = get_numeric_component_value(xc, omega)
@@ -340,18 +284,11 @@ def calculate_t_section(frequency_hz, z_source, z_load, q_max):
             print(f"[{global_sol_counter}] T-Network")
             print(f"    Ser(S): {str_a}, Shu: {str_c}, Ser(L): {str_b}")
             draw_t_section(global_sol_counter, z_source, z_load, str_a, str_b, str_c)
-            
             valid_solutions.append({
-                'id': global_sol_counter,
-                'type': 'T_Section',
-                'comps': [
-                    {'pos': 'series', 'type': ta, 'val': va}, # Ser 1
-                    {'pos': 'shunt', 'type': tc, 'val': vc},  # Shunt
-                    {'pos': 'series', 'type': tb, 'val': vb}  # Ser 2
-                ]
+                'id': global_sol_counter, 'type': 'T_Section',
+                'comps': [{'pos': 'series', 'type': ta, 'val': va}, {'pos': 'shunt', 'type': tc, 'val': vc}, {'pos': 'series', 'type': tb, 'val': vb}]
             })
             global_sol_counter += 1
-            
     return valid_solutions
 
 def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
@@ -360,10 +297,8 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
     y_load = 1 / z_load
     Gs, Bs = y_source.real, y_source.imag
     Gl, Bl = y_load.real, y_load.imag
-    
     valid_solutions = []
     global_sol_counter = 1
-    
     topology = "standard" if Gl < Gs else "swapped"
     args = (Gs, Bs, Gl, Bl) if Gl < Gs else (Gl, Bl, Gs, Bs)
     solutions, error = _solve_t_pi_math(*args, q_max)
@@ -374,26 +309,14 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
 
     print("\n--- Pi-Section Solutions ---")
     for sol in solutions:
-        # Susceptances B
-        if topology == "standard":
-            ba, bb, bc = sol['Xa'], sol['Xb'], sol['Xc'] # Shunt(S), Shunt(L), Series
-        else:
-            ba, bb, bc = sol['Xb'], sol['Xa'], sol['Xc']
+        if topology == "standard": ba, bb, bc = sol['Xa'], sol['Xb'], sol['Xc']
+        else: ba, bb, bc = sol['Xb'], sol['Xa'], sol['Xc']
 
-        # Susceptance to String (Note: get_component_string expects X, these are B.
-        # We need a specific B converter or invert them carefully.
-        # My helper 'get_numeric_component_value' expects Reactance X.
-        # Since B = -1/X or 1/X depending on definition, let's be careful.
-        # B = 1/X -> X = 1/B.
-        
         def b_to_x(b_val): return 1/b_val if abs(b_val) > 1e-12 else np.nan
-        
         xa, xb, xc = b_to_x(ba), b_to_x(bb), b_to_x(bc)
-
-        str_a = get_component_string(xa, omega) # Shunt S
-        str_b = get_component_string(xb, omega) # Shunt L
-        str_c = get_component_string(xc, omega) # Series Mid
-
+        str_a = get_component_string(xa, omega)
+        str_b = get_component_string(xb, omega)
+        str_c = get_component_string(xc, omega)
         ta, va = get_numeric_component_value(xa, omega)
         tb, vb = get_numeric_component_value(xb, omega)
         tc, vc = get_numeric_component_value(xc, omega)
@@ -402,35 +325,22 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
             print(f"[{global_sol_counter}] Pi-Network")
             print(f"    Shu(S): {str_a}, Ser: {str_c}, Shu(L): {str_b}")
             draw_pi_section(global_sol_counter, z_source, z_load, str_a, str_b, str_c)
-            
             valid_solutions.append({
-                'id': global_sol_counter,
-                'type': 'Pi_Section',
-                'comps': [
-                    {'pos': 'shunt', 'type': ta, 'val': va},  # Shunt 1
-                    {'pos': 'series', 'type': tc, 'val': vc}, # Series
-                    {'pos': 'shunt', 'type': tb, 'val': vb}   # Shunt 2
-                ]
+                'id': global_sol_counter, 'type': 'Pi_Section',
+                'comps': [{'pos': 'shunt', 'type': ta, 'val': va}, {'pos': 'series', 'type': tc, 'val': vc}, {'pos': 'shunt', 'type': tb, 'val': vb}]
             })
             global_sol_counter += 1
-
     return valid_solutions
 
-# --- Plotting Logic ---
+# --- Plotting Logic (Corrected) ---
 
 def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
-    """
-    Plots IL with dynamic load recalculation (treating Im(Zl) as L or C).
-    """
     if not solutions_list:
         print("No solutions available to plot.")
         return
 
-    print("\n" + "="*30)
-    print("  PLOTTING SELECTION")
-    print("="*30)
+    print("\n" + "="*30 + "\n  PLOTTING SELECTION\n" + "="*30)
     print("Enter solution IDs (e.g., '1, 3') or 'all':")
-    
     user_sel = input("Selection: ").strip().lower()
     
     selected_indices = []
@@ -449,69 +359,62 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
     if not to_plot: return
 
     # --- DETERMINE LOAD REACTANCE TYPE ---
-    # We assume the imaginary part of Z_L comes from a physical L or C.
     omega_center = 2 * np.pi * f_center
     load_reactance = z_l_complex.imag
     load_resistance = z_l_complex.real
-    
     load_comp_type = None
     load_comp_val = 0.0
     
     if abs(load_reactance) > 1e-9:
         if load_reactance > 0:
-            load_comp_type = 'L'
-            load_comp_val = load_reactance / omega_center
+            load_comp_type = 'L'; load_comp_val = load_reactance / omega_center
         else:
-            load_comp_type = 'C'
-            load_comp_val = -1 / (load_reactance * omega_center)
+            load_comp_type = 'C'; load_comp_val = -1 / (load_reactance * omega_center)
     
-    # Frequency Sweep
     freqs = np.linspace(0.2 * f_center, 2.0 * f_center, 500)
     
-    plt.figure(figsize=(10, 6))
-    
+    print(f"\nGenerating {len(to_plot)} separate plot windows... (They will appear simultaneously)")
+
+    # --- LOOP THROUGH SOLUTIONS ---
     for sol in to_plot:
-        il_data = []
+        # Create a NEW independent figure for each solution
+        plt.figure(figsize=(8, 5)) 
         
+        il_data = []
         for f in freqs:
             omega = 2 * np.pi * f
-            
-            # 1. RECALCULATE Z_LOAD DYNAMICALLY
-            # If the load had reactance, scale it with frequency
+            # 1. Recalc Load
             current_zl_imag = 0.0
-            if load_comp_type == 'L':
-                current_zl_imag = omega * load_comp_val
-            elif load_comp_type == 'C':
-                current_zl_imag = -1 / (omega * load_comp_val)
-            
+            if load_comp_type == 'L': current_zl_imag = omega * load_comp_val
+            elif load_comp_type == 'C': current_zl_imag = -1 / (omega * load_comp_val)
             z_l_current = complex(load_resistance, current_zl_imag)
-
-            # 2. RECALCULATE Z_SOURCE DYNAMICALLY (Optional, usually Zs is pure R)
-            # Assuming Zs is purely resistive 50 Ohm for now as per standard VNA
             z_s_current = z_s 
             
-            # 3. BUILD MATRIX
+            # 2. Build Matrix
             abcd_total = np.eye(2, dtype=complex)
-            
             for comp in sol['comps']:
                 z_val = get_z_component(comp['type'], comp['val'], omega)
-                if comp['pos'] == 'series':
-                    m_step = get_abcd_series(z_val)
-                elif comp['pos'] == 'shunt':
-                    m_step = get_abcd_shunt(z_val)
+                if comp['pos'] == 'series': m_step = get_abcd_series(z_val)
+                elif comp['pos'] == 'shunt': m_step = get_abcd_shunt(z_val)
                 abcd_total = np.dot(abcd_total, m_step)
             
             il = calculate_insertion_loss_db(abcd_total, z_s_current, z_l_current)
             il_data.append(il)
             
-        plt.plot(freqs / 1e6, il_data, label=f"Sol {sol['id']} ({sol['type']})")
-
-    plt.axvline(f_center / 1e6, color='k', linestyle='--', alpha=0.5, label='Center Freq')
-    plt.title(f"Insertion Loss vs Freq (Dynamic Load Modeling)")
-    plt.xlabel("Frequency (MHz)")
-    plt.ylabel("Insertion Loss (dB)")
-    plt.legend()
-    plt.grid(True, which='both', alpha=0.3)
+        # Plot onto the specific figure created for this loop
+        plt.plot(freqs / 1e6, il_data, label=f"Sol {sol['id']} ({sol['type']})", linewidth=2)
+        plt.axvline(f_center / 1e6, color='k', linestyle='--', alpha=0.5, label='Center Freq')
+        plt.title(f"Insertion Loss - Solution {sol['id']}")
+        plt.xlabel("Frequency (MHz)")
+        plt.ylabel("Insertion Loss (dB)")
+        plt.legend()
+        plt.grid(True, which='both', alpha=0.3)
+        plt.tight_layout()
+        
+        # DO NOT call plt.show() here yet. 
+        # If we call it here, the code pauses until you close window 1, then generates window 2.
+    
+    # Call show() ONCE at the very end to display all created figures at the same time.
     plt.show()
 
 # --- Main ---
@@ -520,12 +423,10 @@ def main():
     print("=============================================")
     print(" Passive Matching Network Design Tool 📡")
     print("=============================================")
-
     print("\nSelect the matching network topology:")
     print("  1. L-Section")
     print("  2. π-Section (Pi-Section)")
     print("  3. T-Section")
-
     choice = input("Enter your choice (1-3): ")
     if choice not in ['1', '2', '3']: return
 
@@ -534,30 +435,24 @@ def main():
     z_source = get_complex_input("Source Impedance (Z_S):")
     z_load = get_complex_input("Load Impedance (Z_L):")
     frequency_hz = frequency_mhz * 1e6
-
     generated_solutions = []
 
     if choice == '1':
         generated_solutions = calculate_l_section(frequency_hz, z_source, z_load)
-        
     elif choice in ['2', '3']:
         q_s = abs(z_source.imag) / z_source.real if z_source.real > 1e-9 else 0
         q_l = abs(z_load.imag) / z_load.real if z_load.real > 1e-9 else 0
         min_q = max(q_s, q_l)
-        
         print(f"Min required Q_max: {min_q:.2f}")
         q_max = get_float_input("Enter Maximum Nodal Q (Q_max): ")
-        
         if q_max < min_q:
             print("Error: Q_max too low.")
             return
-
         if choice == '2':
             generated_solutions = calculate_pi_section(frequency_hz, z_source, z_load, q_max)
         else:
             generated_solutions = calculate_t_section(frequency_hz, z_source, z_load, q_max)
 
-    # Trigger Plotting Phase
     if generated_solutions:
         plot_selected_solutions(generated_solutions, frequency_hz, z_source, z_load)
 
