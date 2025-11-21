@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib
-# We DO NOT use matplotlib.use('Agg') because we want plt.show()
+# We DO NOT use matplotlib.use('Agg') because we want plt.show() to work interactively
 import matplotlib.pyplot as plt
 import schemdraw
 import schemdraw.elements as elm
@@ -59,13 +59,36 @@ def get_z_component(ctype, value, omega):
     return 0.0
 
 def calculate_insertion_loss_db(abcd_matrix, Zs, Zl):
+    """Calculates S21 (Insertion Loss) in dB."""
     A, B, C, D = abcd_matrix[0, 0], abcd_matrix[0, 1], abcd_matrix[1, 0], abcd_matrix[1, 1]
     numerator = A * Zl + B + C * Zs * Zl + D * Zs
     denominator = 2 * np.sqrt(Zs.real * Zl.real)
     if denominator == 0: denominator = 1e-12
     ratio = abs(numerator) / denominator
-    if ratio == 0: return 0
-    return 20 * np.log10(ratio)
+    if ratio == 0: return -100
+    # Returns negative dB (S21)
+    return -20 * np.log10(ratio)
+
+def calculate_return_loss_db(abcd_matrix, Zs, Zl):
+    """Calculates S11 (Return Loss) in dB."""
+    A, B, C, D = abcd_matrix[0, 0], abcd_matrix[0, 1], abcd_matrix[1, 0], abcd_matrix[1, 1]
+    
+    # 1. Calculate Input Impedance (Zin)
+    numerator_zin = A * Zl + B
+    denominator_zin = C * Zl + D
+    
+    if abs(denominator_zin) < 1e-12: Zin = 1e12
+    else: Zin = numerator_zin / denominator_zin
+    
+    # 2. Calculate Reflection Coefficient (Gamma)
+    denominator_gamma = Zin + Zs
+    if abs(denominator_gamma) < 1e-12: gamma = 1.0
+    else: gamma = (Zin - Zs) / denominator_gamma
+    
+    mag_gamma = abs(gamma)
+    
+    if mag_gamma < 1e-9: return -100.0
+    return 20 * np.log10(mag_gamma)
 
 # --- Core Math ---
 def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
@@ -93,12 +116,7 @@ def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
     return all_solutions, None
 
 # --- Drawing Helper (Draws on the provided Axis) ---
-
 def draw_circuit_on_axis(ax, sol, zs, zl, omega):
-    """
-    Draws the schematic onto the provided matplotlib axis 'ax'.
-    Includes GROUND connections at Source and Load.
-    """
     d = schemdraw.Drawing(canvas=ax, show=False)
     d.config(unit=3)
     
@@ -108,12 +126,9 @@ def draw_circuit_on_axis(ax, sol, zs, zl, omega):
         lbl = get_component_string(get_z_component(ctype, cval, omega).imag, omega)
         return (elm.Capacitor if ctype=='C' else elm.Inductor, lbl)
 
-    # --- GROUND THE SOURCE NEGATIVE TERMINAL ---
     d.push()
     d.add(elm.Ground())
     d.pop()
-
-    # --- SOURCE (Drawn UP from Ground) ---
     d.add(elm.SourceV().up().label(f'$Z_S$\n{zs.real:.0f}+{zs.imag:.0f}j', loc='bottom'))
     
     comps = sol['comps']
@@ -168,16 +183,11 @@ def draw_circuit_on_axis(ax, sol, zs, zl, omega):
         d.add(elm.Ground())
         d.pop()
 
-    # --- LOAD ---
     d.add(elm.Resistor().right().label(f'$Z_L$\n{zl.real:.0f}+{zl.imag:.0f}j', loc='bottom'))
-    
-    # --- GROUND THE LOAD RETURN PATH ---
     d.add(elm.Ground())
-
     d.draw() 
 
 # --- Calculation Functions ---
-
 def calculate_l_section(frequency_hz, z_source, z_load):
     omega = 2 * np.pi * frequency_hz
     Rs, Xs = z_source.real, z_source.imag
@@ -205,7 +215,6 @@ def calculate_l_section(frequency_hz, z_source, z_load):
         return solutions
 
     print("\n--- L-Section Solutions ---")
-    # Shunt @ Source
     for s in solve_match(Rs, Xs, Rl, Xl):
         ta, va = get_numeric_component_value(s['X_a'], omega)
         tb, vb = get_numeric_component_value(s['X_b'], omega)
@@ -217,7 +226,6 @@ def calculate_l_section(frequency_hz, z_source, z_load):
                                    {'pos': 'series', 'type': tb, 'val': vb}]})
             id_ctr += 1
 
-    # Shunt @ Load
     for s in solve_match(Rl, Xl, Rs, Xs):
         ta, va = get_numeric_component_value(s['X_a'], omega) 
         tb, vb = get_numeric_component_value(s['X_b'], omega) 
@@ -305,8 +313,7 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
             id_ctr += 1
     return sols
 
-# --- Plotting Logic (Combined Windows + Simultaneous) ---
-
+# --- Plotting Logic (Updated for 1x3 Side-by-Side) ---
 def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
     if not solutions_list:
         print("No solutions available to plot.")
@@ -350,17 +357,18 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
 
     # --- LOOP THROUGH SOLUTIONS ---
     for sol in to_plot:
-        # Create ONE figure with 2 rows: Top for Schematic, Bottom for Plot
-        fig, (ax_schem, ax_plot) = plt.subplots(2, 1, figsize=(9, 9))
+        # CHANGED: 1 row, 3 cols. WIDE figure (18, 6)
+        fig, (ax_schem, ax_il, ax_rl) = plt.subplots(1, 3, figsize=(18, 6))
         fig.suptitle(f"Solution {sol['id']}: {sol['type']}", fontsize=16, weight='bold')
         
-        # --- TOP: SCHEMATIC ---
+        # --- LEFT: SCHEMATIC ---
         draw_circuit_on_axis(ax_schem, sol, z_s, z_l_complex, 2*np.pi*f_center)
         ax_schem.set_axis_off()
-        #ax_schem.set_title("Circuit Schematic", fontsize=12)
 
-        # --- BOTTOM: IL PLOT ---
+        # --- DATA CALCULATION ---
         il_data = []
+        rl_data = [] # Return Loss Data
+        
         for f in freqs:
             omega = 2 * np.pi * f
             current_zl_imag = 0.0
@@ -374,17 +382,34 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
                 if comp['pos'] == 'series': m_step = get_abcd_series(z_val)
                 elif comp['pos'] == 'shunt': m_step = get_abcd_shunt(z_val)
                 abcd_total = np.dot(abcd_total, m_step)
-            il_data.append(calculate_insertion_loss_db(abcd_total, z_s, z_l_current))
             
-        ax_plot.plot(freqs / 1e6, il_data, linewidth=2, color='tab:blue', label='IL (dB)')
-        ax_plot.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.7, label='Center Freq')
-        ax_plot.set_title("Insertion Loss Response", fontsize=12)
-        ax_plot.set_xlabel("Frequency (MHz)")
-        ax_plot.set_ylabel("Insertion Loss (dB)")
-        ax_plot.legend()
-        ax_plot.grid(True, which='both', alpha=0.3)
+            # Calculate both
+            il_data.append(calculate_insertion_loss_db(abcd_total, z_s, z_l_current))
+            rl_data.append(calculate_return_loss_db(abcd_total, z_s, z_l_current))
         
-        plt.subplots_adjust(hspace=0.3, top=0.93, bottom=0.08)
+        # --- MIDDLE: INSERTION LOSS ---
+        ax_il.plot(freqs / 1e6, il_data, linewidth=2, color='tab:blue', label='S21 (IL)')
+        ax_il.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.7, label='Center Freq')
+        ax_il.set_title("Insertion Loss (S21)", fontsize=12)
+        ax_il.set_xlabel("Frequency (MHz)")
+        ax_il.set_ylabel("Magnitude (dB)")
+        ax_il.grid(True, which='both', alpha=0.3)
+        ax_il.legend(loc='lower right')
+
+        # --- RIGHT: RETURN LOSS ---
+        ax_rl.plot(freqs / 1e6, rl_data, linewidth=2, color='tab:orange', label='S11 (RL)')
+        ax_rl.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.7, label='Center Freq')
+        ax_rl.axhline(-10, color='k', linestyle=':', alpha=0.5, label='-10dB Limit')
+        ax_rl.set_title("Return Loss (S11)", fontsize=12)
+        ax_rl.set_xlabel("Frequency (MHz)")
+        ax_rl.set_ylabel("Magnitude (dB)")
+        ax_rl.grid(True, which='both', alpha=0.3)
+        ax_rl.legend(loc='lower right')
+        
+        # Adjust layout for side-by-side
+        plt.subplots_adjust(wspace=0.3, top=0.85, bottom=0.15, left=0.05, right=0.95)
+        
+        # Show non-blockingly
         fig.show() 
 
     # 2. DISABLE INTERACTIVE MODE AND BLOCK
