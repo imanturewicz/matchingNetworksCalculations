@@ -92,9 +92,13 @@ def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
             if not np.isnan(Xa): all_solutions.append({'Xa': Xa, 'Xb': Xb, 'Xc': Xc})
     return all_solutions, None
 
-# --- Drawing Helper ---
+# --- Drawing Helper (Draws on the provided Axis) ---
+
 def draw_circuit_on_axis(ax, sol, zs, zl, omega):
-    """Draws the schematic onto the provided matplotlib axis."""
+    """
+    Draws the schematic onto the provided matplotlib axis 'ax'.
+    Includes GROUND connections at Source and Load.
+    """
     d = schemdraw.Drawing(canvas=ax, show=False)
     d.config(unit=3)
     
@@ -104,7 +108,13 @@ def draw_circuit_on_axis(ax, sol, zs, zl, omega):
         lbl = get_component_string(get_z_component(ctype, cval, omega).imag, omega)
         return (elm.Capacitor if ctype=='C' else elm.Inductor, lbl)
 
-    d.add(elm.SourceV().label(f'$Z_S$\n{zs.real:.0f}+{zs.imag:.0f}j', loc='bottom'))
+    # --- GROUND THE SOURCE NEGATIVE TERMINAL ---
+    d.push()
+    d.add(elm.Ground())
+    d.pop()
+
+    # --- SOURCE (Drawn UP from Ground) ---
+    d.add(elm.SourceV().up().label(f'$Z_S$\n{zs.real:.0f}+{zs.imag:.0f}j', loc='bottom'))
     
     comps = sol['comps']
     stype = sol['type']
@@ -158,8 +168,13 @@ def draw_circuit_on_axis(ax, sol, zs, zl, omega):
         d.add(elm.Ground())
         d.pop()
 
+    # --- LOAD ---
     d.add(elm.Resistor().right().label(f'$Z_L$\n{zl.real:.0f}+{zl.imag:.0f}j', loc='bottom'))
-    d.draw(show=False) # Explicitly set show=False here too
+    
+    # --- GROUND THE LOAD RETURN PATH ---
+    d.add(elm.Ground())
+
+    d.draw() 
 
 # --- Calculation Functions ---
 
@@ -290,7 +305,7 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
             id_ctr += 1
     return sols
 
-# --- Plotting Logic (Interactive Mode) ---
+# --- Plotting Logic (Combined Windows + Simultaneous) ---
 
 def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
     if not solutions_list:
@@ -328,32 +343,23 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
     
     freqs = np.linspace(0.2 * f_center, 2.0 * f_center, 500)
     
-    print(f"\nGenerating {len(to_plot)*2} separate windows... (Schematic + Plot for each selection)")
+    print(f"\nGenerating {len(to_plot)} combined windows... (Simultaneous display)")
 
     # 1. ENABLE INTERACTIVE MODE
-    plt.ion() 
+    plt.ion()
 
     # --- LOOP THROUGH SOLUTIONS ---
     for sol in to_plot:
-        # A. SCHEMATIC WINDOW
-        fig_schem = plt.figure(figsize=(6, 4))
-        try: fig_schem.canvas.manager.set_window_title(f"Sol {sol['id']} Schematic")
-        except: pass 
+        # Create ONE figure with 2 rows: Top for Schematic, Bottom for Plot
+        fig, (ax_schem, ax_plot) = plt.subplots(2, 1, figsize=(9, 9))
+        fig.suptitle(f"Solution {sol['id']}: {sol['type']}", fontsize=16, weight='bold')
         
-        ax_schem = fig_schem.add_subplot(111)
+        # --- TOP: SCHEMATIC ---
         draw_circuit_on_axis(ax_schem, sol, z_s, z_l_complex, 2*np.pi*f_center)
         ax_schem.set_axis_off()
-        ax_schem.set_title(f"Solution {sol['id']} Schematic", fontsize=12)
-        fig_schem.show() # Non-blocking show
+        #ax_schem.set_title("Circuit Schematic", fontsize=12)
 
-        # B. IL PLOT WINDOW
-        fig_plot = plt.figure(figsize=(8, 5))
-        try: fig_plot.canvas.manager.set_window_title(f"Sol {sol['id']} Insertion Loss")
-        except: pass
-
-        ax_plot = fig_plot.add_subplot(111)
-        
-        # Data Calc
+        # --- BOTTOM: IL PLOT ---
         il_data = []
         for f in freqs:
             omega = 2 * np.pi * f
@@ -361,7 +367,6 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
             if load_comp_type == 'L': current_zl_imag = omega * load_comp_val
             elif load_comp_type == 'C': current_zl_imag = -1 / (omega * load_comp_val)
             z_l_current = complex(load_resistance, current_zl_imag)
-            z_s_current = z_s 
             
             abcd_total = np.eye(2, dtype=complex)
             for comp in sol['comps']:
@@ -369,19 +374,20 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
                 if comp['pos'] == 'series': m_step = get_abcd_series(z_val)
                 elif comp['pos'] == 'shunt': m_step = get_abcd_shunt(z_val)
                 abcd_total = np.dot(abcd_total, m_step)
-            il_data.append(calculate_insertion_loss_db(abcd_total, z_s_current, z_l_current))
+            il_data.append(calculate_insertion_loss_db(abcd_total, z_s, z_l_current))
             
         ax_plot.plot(freqs / 1e6, il_data, linewidth=2, color='tab:blue', label='IL (dB)')
-        ax_plot.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.5, label='Center Freq')
-        ax_plot.set_title(f"Solution {sol['id']} Insertion Loss")
+        ax_plot.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.7, label='Center Freq')
+        ax_plot.set_title("Insertion Loss Response", fontsize=12)
         ax_plot.set_xlabel("Frequency (MHz)")
         ax_plot.set_ylabel("Insertion Loss (dB)")
         ax_plot.legend()
         ax_plot.grid(True, which='both', alpha=0.3)
-        fig_plot.tight_layout()
-        fig_plot.show() # Non-blocking show
+        
+        plt.subplots_adjust(hspace=0.3, top=0.93, bottom=0.08)
+        fig.show() 
 
-    # 2. DISABLE INTERACTIVE MODE & BLOCK
+    # 2. DISABLE INTERACTIVE MODE AND BLOCK
     plt.ioff()
     print("All windows generated. Close them to exit.")
     plt.show()
