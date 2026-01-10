@@ -455,7 +455,46 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
         ax_rl.plot(freqs / 1e6, rl_data, linewidth=2, color='tab:orange', label='RL')
         ax_rl.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.7, label='Center Freq')
         ax_rl.axhline(-10, color='k', linestyle=':', alpha=0.5, label='-10dB Limit')
-        ax_rl.set_title("Return Loss", fontsize=12)
+        
+        # --- RL Bandwidth Calculation (-10dB) ---
+        limit_rl = -10.0
+        
+        # Condition: Ideally RL should be BELOW -10dB (the "dip")
+        inside_rl_band = rl_data <= limit_rl
+        indices_rl = np.where(inside_rl_band)[0]
+        
+        bw_rl_text = ""
+        
+        if len(indices_rl) > 0:
+            # Check if the dip hits the edge of the simulation range
+            if indices_rl[0] == 0 or indices_rl[-1] == len(freqs) - 1:
+                 bw_rl_text = "\nBW: > Range"
+            else:
+                idx_start = indices_rl[0]
+                idx_end = indices_rl[-1]
+                
+                # Interpolate Start (crossing point on the left)
+                y1, y2 = rl_data[idx_start - 1], rl_data[idx_start]
+                x1, x2 = freqs[idx_start - 1], freqs[idx_start]
+                # x = x1 + (target - y1) * slope
+                f_start_rl = x1 + (limit_rl - y1) * (x2 - x1) / (y2 - y1)
+                
+                # Interpolate End (crossing point on the right)
+                y3, y4 = rl_data[idx_end], rl_data[idx_end + 1]
+                x3, x4 = freqs[idx_end], freqs[idx_end + 1]
+                f_end_rl = x3 + (limit_rl - y3) * (x4 - x3) / (y4 - y3)
+                
+                bw_rl = (f_end_rl - f_start_rl) / 1e6
+                
+                # Plot the green marker line for the bandwidth
+                ax_rl.plot([f_start_rl/1e6, f_end_rl/1e6], [limit_rl, limit_rl], 'go', markersize=5)
+                bw_rl_text = f"\nBW(-10dB): {bw_rl:.1f} MHz"
+
+        else:
+             # This happens if the curve never goes below -10dB
+             bw_rl_text = "\nBW: Poor Match (> -10dB)"
+             
+        ax_rl.set_title(f"Return Loss{bw_rl_text}", fontsize=12)
         ax_rl.set_xlabel("Frequency (MHz)")
         ax_rl.set_ylabel("Magnitude (dB)")
         ax_rl.grid(True, which='both', alpha=0.3)
