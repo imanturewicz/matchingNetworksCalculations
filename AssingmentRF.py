@@ -302,7 +302,7 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
         if topology == "standard": ba, bb, bc = s['Xa'], s['Xb'], s['Xc']
         else: ba, bb, bc = s['Xb'], s['Xa'], s['Xc']
 
-        def b_to_x(b_val): return 1/b_val if abs(b_val) > 1e-12 else np.nan
+        def b_to_x(b_val): return -1/b_val if abs(b_val) > 1e-12 else np.nan
         xa, xb, xc = b_to_x(ba), b_to_x(bb), b_to_x(bc)
 
         ta, va = get_numeric_component_value(xa, omega)
