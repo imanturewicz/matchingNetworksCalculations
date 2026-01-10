@@ -24,36 +24,6 @@ def get_complex_input(prompt):
             print("  Invalid input. Please enter valid numbers.")
 
 # --- Global Helper Functions: Component Calculation ---
-def get_freq_dependent_z(r_val, x_val, f_target, f_array):
-    """
-    Converts a fixed Z = R + jX defined at f_target into a frequency-dependent
-    array Z(f), assuming X comes from an ideal Inductor (if X>0) or Capacitor (if X<0).
-    """
-    z_array = np.zeros_like(f_array, dtype=complex)
-    
-    # Angular frequency arrays
-    w_array = 2 * np.pi * f_array
-    w_target = 2 * np.pi * f_target
-    
-    # 1. Handle Resistance (Constant)
-    z_array.real = r_val
-    
-    # 2. Handle Reactance (Frequency Dependent)
-    if abs(x_val) < 1e-9:
-        # Purely resistive
-        z_array.imag = 0
-    elif x_val > 0:
-        # Inductive: L = X / w
-        L = x_val / w_target
-        z_array.imag = w_array * L
-    else:
-        # Capacitive: C = -1 / (w * X)
-        # Note: x_val is negative here
-        C = -1 / (w_target * x_val)
-        z_array.imag = -1 / (w_array * C)
-        
-    return z_array
-
 def get_component_string(reactance, omega):
     """Converts reactance to a string label (e.g., '12 nH')."""
     if np.isnan(reactance) or abs(omega) < 1e-12: return "N/A"
@@ -574,8 +544,41 @@ def main():
 
     print("\nPlease provide the following parameters:")
     frequency_mhz = get_float_input("Operating Frequency (in MHz): ")
-    z_source = get_complex_input("Source Impedance (Z_S):")
-    z_load = get_complex_input("Load Impedance (Z_L):")
+
+    sType = ""
+    while sType not in ['Z', 'Y']:
+        sType = input("Is the Source defined as Impedance (Z) or Admittance (Y)? [Enter 'Z' or 'Y']: ").strip().upper()
+        if sType not in ['Z', 'Y']:
+            print("Invalid input. Please enter 'Z' or 'Y'.")
+            
+
+    val_source = get_complex_input("Source Value:")
+    if sType == 'Y':
+        if val_source == 0:
+            z_source = complex(1e9, 0) # Treat 0 admittance as essentially infinite impedance
+        else:
+            z_source = 1 / val_source
+        #print(f"   (Converted Admittance Y={val_source:.4f} S to Impedance Z={z_source:.4f} Ω)")
+    else:
+        z_source = val_source
+    
+    lType = ""
+    while lType not in ['Z', 'Y']:
+        lType = input("Is the Load defined as Impedance (Z) or Admittance (Y)? [Enter 'Z' or 'Y']: ").strip().upper()
+        if lType not in ['Z', 'Y']:
+            print("Invalid input. Please enter 'Z' or 'Y'.")
+
+    val_load = get_complex_input("Load Value:")
+
+    if lType == 'Y':
+        if val_load == 0:
+            z_load = complex(1e9, 0)
+        else:
+            z_load = 1 / val_load
+        #print(f"   (Converted Admittance Y={val_load:.4f} S to Impedance Z={z_load:.4f} Ω)")
+    else:
+        z_load = val_load
+
     frequency_hz = frequency_mhz * 1e6
     generated_solutions = []
 
