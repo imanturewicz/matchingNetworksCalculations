@@ -187,8 +187,10 @@ def draw_circuit_on_axis(ax, sol, zs, zl, omega):
         d.add(e3().down().label(l3, loc='bottom'))
         d.add(elm.Ground())
         d.pop()
+        d.add(elm.Line().right(d.unit*1))
 
     d.add(elm.Resistor().right().label(f'$Z_L$\n{zl.real:.0f}+{zl.imag:.0f}j', loc='bottom'))
+    d.add(elm.Line().right(d.unit*1))
     d.add(elm.Ground())
     d.draw() 
 
