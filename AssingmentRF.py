@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib
-# We DO NOT use matplotlib.use('Agg') because we want plt.show() to work interactively
 import matplotlib.pyplot as plt
 import schemdraw
 import schemdraw.elements as elm
@@ -13,6 +12,7 @@ def get_float_input(prompt):
         except ValueError:
             print("  Invalid input. Please enter a valid number.")
 
+# --- Global Helper Functions: Complex Input ---
 def get_complex_input(prompt):
     print(prompt)
     while True:
@@ -28,12 +28,13 @@ def get_component_string(reactance, omega):
     """Converts reactance to a string label (e.g., '12 nH')."""
     if np.isnan(reactance) or abs(omega) < 1e-12: return "N/A"
     if reactance > 0:
-        return f"{(reactance/omega)*1e9:.3f} nH (L)"
+        return f"{(reactance/omega)*1e9:.3f} nH"
     elif reactance < 0:
-        return f"{(-1/(omega*reactance))*1e12:.3f} pF (C)"
+        return f"{(-1/(omega*reactance))*1e12:.3f} pF"
     else:
         return "Short"
 
+# --- Global Helper Functions: Component Value Calculation ---
 def get_numeric_component_value(reactance, omega):
     """Returns a tuple: (Component Type 'L'/'C', Value in Henry/Farad)."""
     if np.isnan(reactance) or abs(omega) < 1e-12: return None, 0.0
@@ -59,18 +60,20 @@ def get_z_component(ctype, value, omega):
     return 0.0
 
 def calculate_insertion_loss_db(abcd_matrix, Zs, Zl):
-    """Calculates S21 (Insertion Loss) in dB."""
+    # Calculates S21 (Insertion Loss) in dB.
     A, B, C, D = abcd_matrix[0, 0], abcd_matrix[0, 1], abcd_matrix[1, 0], abcd_matrix[1, 1]
-    numerator = A * Zl + B + C * Zs * Zl + D * Zs
-    denominator = 2 * np.sqrt(Zs.real * Zl.real)
-    if denominator == 0: denominator = 1e-12
-    ratio = abs(numerator) / denominator
+    denominator = A * Zl + B + C * Zs * Zl + D * Zs
+    numerator = 2 * np.sqrt(Zs.real * Zl.real)
+    if abs(denominator) < 1e-12: 
+        denom_mag = 1e-12
+    else:
+        denom_mag = abs(denominator)
+    ratio = abs(numerator) / denom_mag
     if ratio == 0: return -100
-    # Returns negative dB (S21)
-    return -20 * np.log10(ratio)
+    return 20 * np.log10(ratio) # Return IL in dB
 
 def calculate_return_loss_db(abcd_matrix, Zs, Zl):
-    """Calculates S11 (Return Loss) in dB."""
+    # Calculates S11 (Return Loss) in dB.
     A, B, C, D = abcd_matrix[0, 0], abcd_matrix[0, 1], abcd_matrix[1, 0], abcd_matrix[1, 1]
     
     # 1. Calculate Input Impedance (Zin)
@@ -83,12 +86,12 @@ def calculate_return_loss_db(abcd_matrix, Zs, Zl):
     # 2. Calculate Reflection Coefficient (Gamma)
     denominator_gamma = Zin + Zs
     if abs(denominator_gamma) < 1e-12: gamma = 1.0
-    else: gamma = (Zin - Zs) / denominator_gamma
+    else: gamma = (Zin - Zs.conjugate()) / denominator_gamma
     
     mag_gamma = abs(gamma)
     
     if mag_gamma < 1e-9: return -100.0
-    return 20 * np.log10(mag_gamma)
+    return 20 * np.log10(mag_gamma) # Return RL in dB
 
 # --- Core Math ---
 def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
@@ -96,7 +99,8 @@ def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
     Xb_list = [(q_val * r_l - x_l), (-q_val * r_l - x_l)]
     denominator_Xc = 2 * (r_l - r_s)
     if abs(denominator_Xc) < 1e-9:
-        return [], "Rs/Gs is equal to Rl/Gl. Cannot solve."
+        return [], "Xs is equal to Xl. Cannot solve."
+    # Iterate through possible Xb values
     for Xb in Xb_list:
         Xb_plus_Xl = Xb + x_l
         term1 = r_s * (Xb_plus_Xl)**2
@@ -106,6 +110,7 @@ def _solve_t_pi_math(r_s, x_s, r_l, x_l, q_val):
         sqrt_Delta = np.sqrt(Delta)
         numerator_base_Xc = 2 * r_s * Xb_plus_Xl
         Xc_list = [(numerator_base_Xc + sqrt_Delta) / denominator_Xc, (numerator_base_Xc - sqrt_Delta) / denominator_Xc]
+        # Iterate through possible Xc values
         for Xc in Xc_list:
             Xc_plus_Xb_plus_Xl = Xc + Xb + x_l
             numerator_Xa = Xc * (r_l**2 + Xb_plus_Xl * Xc_plus_Xb_plus_Xl)
@@ -137,47 +142,47 @@ def draw_circuit_on_axis(ax, sol, zs, zl, omega):
     if stype == 'L_ShuntSource':
         e1, l1 = get_elm(comps[0])
         e2, l2 = get_elm(comps[1])
-        d.add(elm.Line().right(d.unit*1.5))
+        d.add(elm.Line().right(d.unit*2))
         d.push()
         d.add(e1().down().label(l1, loc='bottom'))
         d.add(elm.Ground())
         d.pop()
         d.add(e2().right().label(l2, loc='top'))
-        d.add(elm.Line().right(d.unit*0.5))
+        d.add(elm.Line().right(d.unit*1))
 
     elif stype == 'L_ShuntLoad':
         e1, l1 = get_elm(comps[0])
         e2, l2 = get_elm(comps[1])
-        d.add(e1().right(d.unit*1.5).label(l1, loc='top'))
+        d.add(e1().right(d.unit*2).label(l1, loc='top'))
         d.push()
         d.add(e2().down().label(l2, loc='bottom'))
         d.add(elm.Ground())
         d.pop()
-        d.add(elm.Line().right(d.unit*0.5))
+        d.add(elm.Line().right(d.unit*1))
 
     elif stype == 'T_Section':
         e1, l1 = get_elm(comps[0])
         e2, l2 = get_elm(comps[1])
         e3, l3 = get_elm(comps[2])
-        d.add(e1().right(d.unit*1.5).label(l1, loc='top'))
+        d.add(e1().right(d.unit*2).label(l1, loc='bottom'))
         d.push()
         d.add(e2().down().label(l2, loc='bottom'))
         d.add(elm.Ground())
         d.pop()
         d.add(e3().right().label(l3, loc='top'))
-        d.add(elm.Line().right(d.unit*0.5))
+        d.add(elm.Line().right(d.unit*1))
 
     elif stype == 'Pi_Section':
         e1, l1 = get_elm(comps[0])
         e2, l2 = get_elm(comps[1])
         e3, l3 = get_elm(comps[2])
-        d.add(elm.Line().right(d.unit*1.5))
+        d.add(elm.Line().right(d.unit*2))
         d.push()
         d.add(e1().down().label(l1, loc='bottom'))
         d.add(elm.Ground())
         d.pop()
         d.add(e2().right().label(l2, loc='top'))
-        d.add(elm.Line().right(d.unit*0.5))
+        d.add(elm.Line().right(d.unit*1))
         d.push()
         d.add(e3().down().label(l3, loc='bottom'))
         d.add(elm.Ground())
@@ -195,15 +200,17 @@ def calculate_l_section(frequency_hz, z_source, z_load):
     sols = [] 
     id_ctr = 1
 
+    # L-Section Math Solver, the math derivations are in the accompanying report
     def solve_match(r_s, x_s, r_l, x_l):
         solutions = []
-        D = (4 * (r_s**2) * (x_l**2)) - (4 * (r_s**2) * (r_l**2 + x_l**2)) + (4 * r_s * r_l * (r_s**2 + x_s**2))
+        D = (4 * (r_s**2) * (x_l**2)) - (4 * (r_s**2) * (r_l**2 + x_l**2)) + (4 * r_s * r_l * (r_s**2 + x_s**2)) # discriminant
         if D < 0: return solutions
         sqrt_D = np.sqrt(D)
         denominator = 2 * r_s
         if abs(denominator) < 1e-9: return solutions
         X_b1 = (-2 * r_s * x_l + sqrt_D) / denominator
         X_b2 = (-2 * r_s * x_l - sqrt_D) / denominator
+        # Calculate corresponding X_a values
         def calc_Xa(Xb):
             Rs2_Xs2 = r_s**2 + x_s**2; Xb_Xl = Xb + x_l
             Rl2_XbXl2 = r_l**2 + Xb_Xl**2
@@ -214,7 +221,7 @@ def calculate_l_section(frequency_hz, z_source, z_load):
         solutions.append({'X_b': X_b2, 'X_a': calc_Xa(X_b2)})
         return solutions
 
-    print("\n--- L-Section Solutions ---")
+    print("\n--- L-Section Solutions ---") # shunt at source
     for s in solve_match(Rs, Xs, Rl, Xl):
         ta, va = get_numeric_component_value(s['X_a'], omega)
         tb, vb = get_numeric_component_value(s['X_b'], omega)
@@ -226,6 +233,7 @@ def calculate_l_section(frequency_hz, z_source, z_load):
                                    {'pos': 'series', 'type': tb, 'val': vb}]})
             id_ctr += 1
 
+    # Now the swapped topology (shunt at load)
     for s in solve_match(Rl, Xl, Rs, Xs):
         ta, va = get_numeric_component_value(s['X_a'], omega) 
         tb, vb = get_numeric_component_value(s['X_b'], omega) 
@@ -313,7 +321,7 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
             id_ctr += 1
     return sols
 
-# --- Plotting Logic (Updated for 1x3 Side-by-Side) ---
+# --- Plotting Logic ---
 def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
     if not solutions_list:
         print("No solutions available to plot.")
@@ -348,16 +356,16 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
         if load_reactance > 0: load_comp_type = 'L'; load_comp_val = load_reactance / omega_center
         else: load_comp_type = 'C'; load_comp_val = -1 / (load_reactance * omega_center)
     
-    freqs = np.linspace(0.2 * f_center, 2.0 * f_center, 500)
+    freqs = np.linspace(0.2 * f_center, 2.0 * f_center, 800) # More points for better BW calc
     
     print(f"\nGenerating {len(to_plot)} combined windows... (Simultaneous display)")
 
-    # 1. ENABLE INTERACTIVE MODE
+    # 1. ENABLE INTERACTIVE DRAWING MODE
     plt.ion()
 
     # --- LOOP THROUGH SOLUTIONS ---
     for sol in to_plot:
-        # CHANGED: 1 row, 3 cols. WIDE figure (18, 6)
+        # 1 Row, 3 Columns, Wide Figure
         fig, (ax_schem, ax_il, ax_rl) = plt.subplots(1, 3, figsize=(18, 6))
         fig.suptitle(f"Solution {sol['id']}: {sol['type']}", fontsize=16, weight='bold')
         
@@ -367,7 +375,7 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
 
         # --- DATA CALCULATION ---
         il_data = []
-        rl_data = [] # Return Loss Data
+        rl_data = []
         
         for f in freqs:
             omega = 2 * np.pi * f
@@ -377,7 +385,7 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
             z_l_current = complex(load_resistance, current_zl_imag)
             
             abcd_total = np.eye(2, dtype=complex)
-            for comp in sol['comps']:
+            for comp in sol['comps']: # each iteration multiplies the ABCD matrix into the total one (of the whole network)
                 z_val = get_z_component(comp['type'], comp['val'], omega)
                 if comp['pos'] == 'series': m_step = get_abcd_series(z_val)
                 elif comp['pos'] == 'shunt': m_step = get_abcd_shunt(z_val)
@@ -387,20 +395,67 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
             il_data.append(calculate_insertion_loss_db(abcd_total, z_s, z_l_current))
             rl_data.append(calculate_return_loss_db(abcd_total, z_s, z_l_current))
         
+        il_data = np.array(il_data)
+        rl_data = np.array(rl_data)
+
         # --- MIDDLE: INSERTION LOSS ---
-        ax_il.plot(freqs / 1e6, il_data, linewidth=2, color='tab:blue', label='S21 (IL)')
+        ax_il.plot(freqs / 1e6, il_data, linewidth=2, color='tab:blue', label='IL')
         ax_il.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.7, label='Center Freq')
-        ax_il.set_title("Insertion Loss (S21)", fontsize=12)
+        
+        # --- Robust 3dB Bandwidth Calculation ---
+        max_il = np.max(il_data)
+        limit_3db = max_il - 3.0
+        
+        # Boolean array: True where we are inside the passband
+        inside_band = il_data >= limit_3db
+        indices = np.where(inside_band)[0]
+        
+        bw_text = ""
+        
+        if len(indices) > 0:
+            # Check if passband touches the edges of the simulation (implies BW > Sweep)
+            if indices[0] == 0 or indices[-1] == len(freqs) - 1:
+                 # Just plot the line, calculation is invalid if we hit the edge
+                 ax_il.axhline(limit_3db, color='g', linestyle=':', alpha=0.6, label='-3dB Level')
+                 bw_text = "\nBW: > Range"
+            else:
+                # Find left and right edges of the passband
+                idx_left = indices[0]
+                idx_right = indices[-1]
+                
+                # Interpolate Left Edge (between idx_left-1 and idx_left)
+                y1, y2 = il_data[idx_left - 1], il_data[idx_left]
+                x1, x2 = freqs[idx_left - 1], freqs[idx_left]
+                f_start = x1 + (limit_3db - y1) * (x2 - x1) / (y2 - y1)
+                
+                # Interpolate Right Edge (between idx_right and idx_right+1)
+                y3, y4 = il_data[idx_right], il_data[idx_right + 1]
+                x3, x4 = freqs[idx_right], freqs[idx_right + 1]
+                f_end = x3 + (limit_3db - y3) * (x4 - x3) / (y4 - y3)
+                
+                bw = (f_end - f_start) / 1e6
+                q_loaded = (f_center/1e6) / bw if bw > 1e-9 else 0
+                
+                ax_il.axhline(limit_3db, color='g', linestyle=':', alpha=0.6, label='-3dB Level')
+                ax_il.plot([f_start/1e6, f_end/1e6], [limit_3db, limit_3db], 'go', markersize=5)
+                bw_text = f"\nBW(3dB): {bw:.1f} MHz, Q_L: {q_loaded:.1f}"
+
+        else:
+             bw_text = "\nBW: Undefined"
+             
+        ax_il.set_title(f"Insertion Loss (S21){bw_text}", fontsize=12)
+
+        ax_il.set_title(f"Insertion Loss{bw_text}", fontsize=12)
         ax_il.set_xlabel("Frequency (MHz)")
         ax_il.set_ylabel("Magnitude (dB)")
         ax_il.grid(True, which='both', alpha=0.3)
         ax_il.legend(loc='lower right')
 
         # --- RIGHT: RETURN LOSS ---
-        ax_rl.plot(freqs / 1e6, rl_data, linewidth=2, color='tab:orange', label='S11 (RL)')
+        ax_rl.plot(freqs / 1e6, rl_data, linewidth=2, color='tab:orange', label='RL')
         ax_rl.axvline(f_center / 1e6, color='r', linestyle='--', alpha=0.7, label='Center Freq')
         ax_rl.axhline(-10, color='k', linestyle=':', alpha=0.5, label='-10dB Limit')
-        ax_rl.set_title("Return Loss (S11)", fontsize=12)
+        ax_rl.set_title("Return Loss", fontsize=12)
         ax_rl.set_xlabel("Frequency (MHz)")
         ax_rl.set_ylabel("Magnitude (dB)")
         ax_rl.grid(True, which='both', alpha=0.3)
