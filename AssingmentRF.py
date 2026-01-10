@@ -24,6 +24,36 @@ def get_complex_input(prompt):
             print("  Invalid input. Please enter valid numbers.")
 
 # --- Global Helper Functions: Component Calculation ---
+def get_freq_dependent_z(r_val, x_val, f_target, f_array):
+    """
+    Converts a fixed Z = R + jX defined at f_target into a frequency-dependent
+    array Z(f), assuming X comes from an ideal Inductor (if X>0) or Capacitor (if X<0).
+    """
+    z_array = np.zeros_like(f_array, dtype=complex)
+    
+    # Angular frequency arrays
+    w_array = 2 * np.pi * f_array
+    w_target = 2 * np.pi * f_target
+    
+    # 1. Handle Resistance (Constant)
+    z_array.real = r_val
+    
+    # 2. Handle Reactance (Frequency Dependent)
+    if abs(x_val) < 1e-9:
+        # Purely resistive
+        z_array.imag = 0
+    elif x_val > 0:
+        # Inductive: L = X / w
+        L = x_val / w_target
+        z_array.imag = w_array * L
+    else:
+        # Capacitive: C = -1 / (w * X)
+        # Note: x_val is negative here
+        C = -1 / (w_target * x_val)
+        z_array.imag = -1 / (w_array * C)
+        
+    return z_array
+
 def get_component_string(reactance, omega):
     """Converts reactance to a string label (e.g., '12 nH')."""
     if np.isnan(reactance) or abs(omega) < 1e-12: return "N/A"
@@ -324,7 +354,7 @@ def calculate_pi_section(frequency_hz, z_source, z_load, q_max):
     return sols
 
 # --- Plotting Logic ---
-def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
+def plot_selected_solutions(solutions_list, f_center, z_s, z_l):
     if not solutions_list:
         print("No solutions available to plot.")
         return
@@ -350,14 +380,23 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
 
     # Load Setup
     omega_center = 2 * np.pi * f_center
-    load_reactance = z_l_complex.imag
-    load_resistance = z_l_complex.real
+    load_reactance = z_l.imag
+    load_resistance = z_l.real
     load_comp_type = None
     load_comp_val = 0.0
     if abs(load_reactance) > 1e-9:
         if load_reactance > 0: load_comp_type = 'L'; load_comp_val = load_reactance / omega_center
         else: load_comp_type = 'C'; load_comp_val = -1 / (load_reactance * omega_center)
-    
+
+    # --- Setup Source Component Logic ---
+    zs_resistance = z_s.real
+    zs_reactance = z_s.imag
+    zs_comp_type = None
+    zs_comp_val = 0.0
+    if abs(zs_reactance) > 1e-9:
+        if zs_reactance > 0: zs_comp_type = 'L'; zs_comp_val = zs_reactance / omega_center
+        else: zs_comp_type = 'C'; zs_comp_val = -1 / (zs_reactance * omega_center)
+
     freqs = np.linspace(0.2 * f_center, 2.0 * f_center, 800) # More points for better BW calc
     
     print(f"\nGenerating {len(to_plot)} combined windows... (Simultaneous display)")
@@ -372,7 +411,7 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
         fig.suptitle(f"Solution {sol['id']}: {sol['type']}", fontsize=16, weight='bold')
         
         # --- LEFT: SCHEMATIC ---
-        draw_circuit_on_axis(ax_schem, sol, z_s, z_l_complex, 2*np.pi*f_center)
+        draw_circuit_on_axis(ax_schem, sol, z_s, z_l, 2*np.pi*f_center)
         ax_schem.set_axis_off()
 
         # --- DATA CALCULATION ---
@@ -385,6 +424,14 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
             if load_comp_type == 'L': current_zl_imag = omega * load_comp_val
             elif load_comp_type == 'C': current_zl_imag = -1 / (omega * load_comp_val)
             z_l_current = complex(load_resistance, current_zl_imag)
+
+            current_zs_imag = 0.0
+            if zs_comp_type == 'L': 
+                current_zs_imag = omega * zs_comp_val
+            elif zs_comp_type == 'C': 
+                current_zs_imag = -1 / (omega * zs_comp_val)
+            
+            z_s_current = complex(zs_resistance, current_zs_imag)
             
             abcd_total = np.eye(2, dtype=complex)
             for comp in sol['comps']: # each iteration multiplies the ABCD matrix into the total one (of the whole network)
@@ -394,8 +441,8 @@ def plot_selected_solutions(solutions_list, f_center, z_s, z_l_complex):
                 abcd_total = np.dot(abcd_total, m_step)
             
             # Calculate both
-            il_data.append(calculate_insertion_loss_db(abcd_total, z_s, z_l_current))
-            rl_data.append(calculate_return_loss_db(abcd_total, z_s, z_l_current))
+            il_data.append(calculate_insertion_loss_db(abcd_total, z_s_current, z_l_current))
+            rl_data.append(calculate_return_loss_db(abcd_total, z_s_current, z_l_current))
         
         il_data = np.array(il_data)
         rl_data = np.array(rl_data)
